@@ -5,9 +5,15 @@ import pg from 'pg';
 import { mountSite } from './routes_site.js';
 
 const { PORT = 3000, DATABASE_URL, JWT_SECRET, WEBHOOK_SECRET, WEBHOOK_TOLERANCE_SEC = 300 } = process.env;
-if (!DATABASE_URL || !JWT_SECRET || !WEBHOOK_SECRET) throw new Error('Missing required env vars');
+const missing = ['DATABASE_URL', 'JWT_SECRET', 'WEBHOOK_SECRET'].filter((k) => !process.env[k]);
+if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}. Add them in Vercel > Project > Settings > Environment Variables, then redeploy.`);
 
-const pool = new pg.Pool({ connectionString: DATABASE_URL });
+// Serverless-friendly pool: few connections, TLS for hosted Postgres (Neon, Supabase, etc.)
+const pool = new pg.Pool({
+  connectionString: DATABASE_URL,
+  max: process.env.VERCEL ? 3 : 10,
+  ssl: process.env.VERCEL || /sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
+});
 const app = express();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STATUSES = ['pending', 'completed', 'failed', 'cancelled'];
@@ -117,7 +123,7 @@ app.post('/api/webhooks/payment-status', express.raw({ type: 'application/json',
 
 app.use(express.json({ limit: '8kb' }));
 app.set('trust proxy', 1);
-app.use(express.static('public'));
+app.use(express.static(new URL('./public', import.meta.url).pathname));
 
 const signToken = (sub) => jwt.sign({ sub }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' });
 mountSite({ app, pool, requireAuth, signToken, toReceipt });
@@ -157,5 +163,6 @@ app.post('/api/transactions/:id/refresh', requireAuth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`listening on :${PORT}`));
+if (!process.env.VERCEL) app.listen(PORT, () => console.log(`listening on :${PORT}`));
 export { app };
+export default app; // Vercel uses the default export as the request handler

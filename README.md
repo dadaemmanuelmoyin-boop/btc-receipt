@@ -46,3 +46,8 @@ Flow: register two accounts → send from one to the other's cashtag → the sta
 
 Deploy (Render, Railway, Fly, any Node host): set `DATABASE_URL`, `JWT_SECRET`, `WEBHOOK_SECRET`, run `npm run migrate` once, start with `npm start`, and serve over HTTPS only. Point the provider's webhook at `https://<your-domain>/api/webhooks/payment-status`.
 Before launch: swap in-memory rate limiting for a shared store, store the token in an httpOnly cookie if you want stronger XSS resistance, and complete the provider integration + any money-transmission/KYC requirements for your jurisdiction.
+
+## Deploying on Vercel
+1. Create a hosted Postgres (Neon or Supabase, both have free tiers) and run `db/001_init.sql` then `db/002_website.sql` in its SQL editor.
+2. In Vercel > Project > Settings > Environment Variables add `DATABASE_URL`, `JWT_SECRET`, `WEBHOOK_SECRET`, then redeploy.
+3. A 500 `FUNCTION_INVOCATION_FAILED` almost always means one of those variables is missing or the database is unreachable; check Vercel > Logs.

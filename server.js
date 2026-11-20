@@ -6,7 +6,7 @@ import { mountSite } from './routes_site.js';
 
 const { PORT = 3000, DATABASE_URL, JWT_SECRET, WEBHOOK_SECRET, WEBHOOK_TOLERANCE_SEC = 300 } = process.env;
 const missing = ['DATABASE_URL', 'JWT_SECRET', 'WEBHOOK_SECRET'].filter((k) => !process.env[k]);
-if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}. Add them in Vercel > Project > Settings > Environment Variables, then redeploy.`);
+if (missing.length) console.error(`Missing environment variables: ${missing.join(', ')}. Add them in Vercel > Project > Settings > Environment Variables, then redeploy.`);
 
 // Serverless-friendly pool: few connections, TLS for hosted Postgres (Neon, Supabase, etc.)
 const pool = new pg.Pool({
@@ -15,6 +15,8 @@ const pool = new pg.Pool({
   ssl: process.env.VERCEL || /sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
 });
 const app = express();
+// Never crash on boot: pages still load, and the API says exactly what is missing
+app.use('/api', (req, res, next) => (missing.length ? res.status(503).json({ error: 'server_not_configured', missing }) : next()));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STATUSES = ['pending', 'completed', 'failed', 'cancelled'];
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+<title>Transfer status</title>
+<style>
+  :root { --green:#58C446; --green-press:#4BB03B; --ink:#111111; --bg:#FFFFFF; --muted:#5b5b5b; --err:#C62828; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overscroll-behavior: none; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink); -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top) 0 0;
+  }
+  .screen { min-height: 100dvh; display: flex; flex-direction: column; padding: 0 24px calc(24px + env(safe-area-inset-bottom)); }
+  main { flex: 1; padding-top: 22vh; }
+  .badge { width: 56px; height: 56px; border-radius: 50%; background: var(--green); display: grid; place-items: center; transition: background .2s; }
+  .badge svg { width: 28px; height: 28px; stroke: #fff; stroke-width: 3.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .badge[data-status="failed"], .badge[data-status="cancelled"] { background: var(--err); }
+  h1 { margin: 56px 0 0; font-size: 2rem; line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; min-height: 3.4em; overflow-wrap: anywhere; }
+  .note { margin: 16px 0 0; color: var(--muted); font-size: 1rem; line-height: 1.4; min-height: 1.4em; }
+  .pill {
+    width: 100%; height: 56px; border: 0; border-radius: 9999px; background: var(--green); color: #fff;
+    font-weight: 600; font-size: 1.125rem; font-family: inherit; cursor: pointer; transition: background .15s, opacity .15s;
+  }
+  .pill:active { background: var(--green-press); }
+  .pill:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  .pill[aria-busy="true"] { opacity: .7; cursor: progress; }
+  .pill[data-status="failed"], .pill[data-status="cancelled"] { background: var(--ink); }
+  .skeleton { display:block; height: 1.1em; margin: .35em 0; border-radius: 6px; background: #eee; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="screen">
+  <main>
+    <div class="badge" id="badge" data-status="pending" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path id="icon" d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    </div>
+    <h1 id="headline"><span class="skeleton"></span><span class="skeleton" style="width:70%"></span></h1>
+    <p class="note" id="note"></p>
+  </main>
+  <!-- Polite live region: announces status changes only -->
+  <div id="live" role="status" aria-live="polite" style="position:absolute;left:-9999px"></div>
+  <button class="pill" id="pill" type="button" data-status="pending" disabled>Pending</button>
+</div>
+
+<script type="module">
+const params = new URLSearchParams(location.search);
+const txId = params.get('id');
+const token = sessionStorage.getItem('token'); // set by your login flow
+const $ = (id) => document.getElementById(id);
+const els = { headline: $('headline'), note: $('note'), pill: $('pill'), badge: $('badge'), live: $('live'), icon: $('icon') };
+const CHECK = 'M5 12.5l4.5 4.5L19 7.5', CROSS = 'M6 6l12 12M18 6L6 18';
+const POLL_MIN = 3000, POLL_MAX = 30000;
+let tx = null, delay = POLL_MIN, timer = null, lastStatus = null, inflight = false;
+
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { ...opts, headers: { Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
+  if (!r.ok) { const e = new Error(String(r.status)); e.status = r.status; throw e; }
+  return r.json();
+};
+
+function render(t) {
+  const { formattedAmount, asset, recipientCashtag: who, status } = t;
+  // textContent only: server strings are never injected as HTML
+  const copy = {
+    pending:   `Sent! ${formattedAmount} ${asset} will be deposited once ${who} completes the payment.`,
+    completed: `Done! ${formattedAmount} ${asset} was deposited. ${who} completed the payment.`,
+    failed:    `The payment from ${who} didn't go through. No ${asset} was deposited.`,
+    cancelled: `This transfer was cancelled. No ${asset} was deposited.`,
+  }[status];
+  els.headline.textContent = copy;
+  els.badge.dataset.status = els.pill.dataset.status = status;
+  els.icon.setAttribute('d', status === 'failed' || status === 'cancelled' ? CROSS : CHECK);
+  els.pill.disabled = false;
+  els.pill.textContent = { pending: 'Pending', completed: 'View receipt', failed: 'Close', cancelled: 'Close' }[status];
+  els.pill.setAttribute('aria-label', status === 'pending' ? 'Pending. Press to refresh status' : els.pill.textContent);
+  if (lastStatus && lastStatus !== status) els.live.textContent = copy; // announce transitions only
+  lastStatus = status;
+}
+
+const setNote = (msg) => { els.note.textContent = msg || ''; };
+const stop = () => { clearTimeout(timer); timer = null; };
+const schedule = () => { stop(); if (!tx || tx.status === 'pending') timer = setTimeout(load, delay); };
+
+function showMissing() {
+  stop(); tx = { status: 'missing' };
+  els.headline.textContent = "We couldn't find this transfer.";
+  els.pill.textContent = 'Close'; els.pill.dataset.status = 'failed'; els.pill.disabled = false;
+}
+
+async function load() {
+  if (inflight) return;
+  inflight = true;
+  try {
+    tx = await api(`/api/transactions/${encodeURIComponent(txId)}`);
+    delay = POLL_MIN; setNote(''); render(tx);
+  } catch (e) {
+    if (e.status === 404) { showMissing(); return; }
+    if (e.status === 401) { stop(); setNote('Your session expired. Sign in again to see this transfer.'); return; }
+    delay = Math.min(delay * 2, POLL_MAX);
+    setNote('Having trouble reaching the server. Retrying…');
+  } finally { inflight = false; }
+  schedule();
+}
+
+els.pill.addEventListener('click', async () => {
+  if (!tx) return;
+  if (tx.status === 'pending') {
+    els.pill.setAttribute('aria-busy', 'true');
+    try {
+      tx = await api(`/api/transactions/${encodeURIComponent(txId)}/refresh`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() } });
+      render(tx); setNote('');
+    } catch { setNote("Couldn't refresh. Try again in a moment."); }
+    finally { els.pill.removeAttribute('aria-busy'); schedule(); }
+  } else if (tx.status === 'completed') {
+    location.href = '/';
+  } else { history.length > 1 ? history.back() : (location.href = '/'); }
+});
+
+// Pause polling while hidden; refresh immediately when visible again
+document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else { delay = POLL_MIN; load(); } });
+
+if (!token) location.replace('/'); else if (!txId) showMissing(); else load();
+</script>
+</body>
+</html>

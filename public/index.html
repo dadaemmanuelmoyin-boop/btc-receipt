@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+<title>Send bitcoin</title>
+<style>
+  :root { --green:#58C446; --ink:#111; --muted:#5b5b5b; --line:#e4e4e4; --err:#C62828; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:#fff; color:var(--ink); overscroll-behavior:none;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 440px; margin: 0 auto; padding: calc(32px + env(safe-area-inset-top)) 24px calc(32px + env(safe-area-inset-bottom)); }
+  h1 { font-size: 2rem; letter-spacing: -.02em; margin: 0 0 24px; }
+  h2 { font-size: 1.125rem; margin: 40px 0 12px; }
+  label { display:block; font-weight:600; margin: 16px 0 6px; }
+  input { width:100%; height:52px; border:1.5px solid var(--line); border-radius:12px; padding:0 14px; font:inherit; }
+  input:focus-visible { outline:3px solid var(--ink); outline-offset:1px; }
+  .btn { width:100%; height:56px; margin-top:24px; border:0; border-radius:9999px; background:var(--green); color:#fff; font:600 1.125rem inherit; font-family:inherit; cursor:pointer; }
+  .btn:disabled { opacity:.6; cursor:progress; }
+  .link { background:none; border:0; padding:0; font:inherit; color:var(--ink); text-decoration:underline; cursor:pointer; }
+  .err { color:var(--err); min-height:1.4em; margin:12px 0 0; }
+  ul { list-style:none; margin:0; padding:0; }
+  li a { display:flex; justify-content:space-between; gap:12px; padding:16px 0; border-bottom:1px solid var(--line); color:inherit; text-decoration:none; }
+  li a:focus-visible { outline:3px solid var(--ink); }
+  .s { color:var(--muted); } .s.completed { color:#2f8a21; } .s.failed,.s.cancelled { color:var(--err); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section id="auth" hidden>
+    <h1 id="authTitle">Sign in</h1>
+    <form id="authForm" novalidate>
+      <label for="tag">Cashtag</label>
+      <input id="tag" autocomplete="username" autocapitalize="none" placeholder="$yourname" required>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" minlength="10" required>
+      <p class="err" id="authErr" role="alert"></p>
+      <button class="btn" id="authBtn">Sign in</button>
+    </form>
+    <p><button class="link" id="toggle" type="button">Create an account</button></p>
+  </section>
+
+  <section id="app" hidden>
+    <h1>Send bitcoin</h1>
+    <form id="sendForm" novalidate>
+      <label for="to">Recipient</label>
+      <input id="to" autocapitalize="none" placeholder="$cashtag" required>
+      <label for="amt">Amount (USD)</label>
+      <input id="amt" inputmode="decimal" placeholder="25.00" required>
+      <p class="err" id="sendErr" role="alert"></p>
+      <button class="btn" id="sendBtn">Send</button>
+    </form>
+    <h2>Activity</h2>
+    <ul id="list" aria-live="polite"></ul>
+    <p><button class="link" id="out" type="button">Sign out</button></p>
+  </section>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+let mode = 'login', token = sessionStorage.getItem('token');
+
+const post = async (url, body, headers = {}) => {
+  const r = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }), ...headers }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error || r.status), { code: j.error });
+  return j;
+};
+const MSG = { invalid_credentials:'Cashtag or password is wrong.', cashtag_taken:'That cashtag is taken.', invalid_cashtag:'Use 3–20 letters, numbers or underscores.',
+  weak_password:'Use a password with at least 10 characters.', recipient_not_found:'No one has that cashtag.', cannot_send_to_self:"You can't send to yourself.",
+  invalid_amount:'Enter an amount from $1 to $10,000.', too_many_attempts:'Too many tries. Wait a minute.' };
+const say = (el, e) => { el.textContent = MSG[e.code] || 'Something went wrong. Try again.'; };
+
+function view() { $('auth').hidden = !!token; $('app').hidden = !token; if (token) loadList(); }
+
+$('toggle').onclick = () => { mode = mode === 'login' ? 'register' : 'login';
+  $('authTitle').textContent = $('authBtn').textContent = mode === 'login' ? 'Sign in' : 'Create account';
+  $('toggle').textContent = mode === 'login' ? 'Create an account' : 'I already have an account';
+  $('pw').autocomplete = mode === 'login' ? 'current-password' : 'new-password'; $('authErr').textContent = ''; };
+
+$('authForm').onsubmit = async (e) => { e.preventDefault(); $('authBtn').disabled = true; $('authErr').textContent = '';
+  try { const r = await post(`/api/auth/${mode === 'login' ? 'login' : 'register'}`, { cashtag: $('tag').value, password: $('pw').value });
+    token = r.token; sessionStorage.setItem('token', token); $('pw').value = ''; view(); }
+  catch (err) { say($('authErr'), err); } finally { $('authBtn').disabled = false; } };
+
+$('out').onclick = () => { sessionStorage.removeItem('token'); token = null; view(); };
+
+$('sendForm').onsubmit = async (e) => { e.preventDefault(); $('sendErr').textContent = '';
+  const dollars = Number($('amt').value.replace(/[$,]/g, ''));
+  if (!Number.isFinite(dollars)) return say($('sendErr'), { code:'invalid_amount' });
+  $('sendBtn').disabled = true;
+  try { const tx = await post('/api/transactions', { recipientCashtag: $('to').value, amountCents: Math.round(dollars * 100) }, { 'Idempotency-Key': crypto.randomUUID() });
+    location.href = `/transfer.html?id=${encodeURIComponent(tx.id)}`; }
+  catch (err) { if (err.message === '401') { $('out').click(); } else say($('sendErr'), err); } finally { $('sendBtn').disabled = false; } };
+
+async function loadList() {
+  const r = await fetch('/api/transactions', { headers:{ Authorization:`Bearer ${token}` } });
+  if (r.status === 401) { $('out').click(); return; }
+  const rows = r.ok ? await r.json() : [];
+  const ul = $('list'); ul.replaceChildren();
+  if (!rows.length) { const li = document.createElement('li'); li.className = 's'; li.textContent = 'No transfers yet. Send your first one above.'; ul.append(li); return; }
+  for (const t of rows) {
+    const li = document.createElement('li'), a = document.createElement('a'), l = document.createElement('span'), s = document.createElement('span');
+    a.href = `/transfer.html?id=${encodeURIComponent(t.id)}`;
+    l.textContent = `${t.formattedAmount} ${t.asset} · ${t.recipientCashtag}`;
+    s.className = `s ${t.status}`; s.textContent = t.status[0].toUpperCase() + t.status.slice(1);
+    a.append(l, s); li.append(a); ul.append(li);
+  }
+}
+view();
+</script>
+</body>
+</html>

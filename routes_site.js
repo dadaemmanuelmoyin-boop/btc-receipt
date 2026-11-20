@@ -50,6 +50,25 @@ export function mountSite({ app, pool, requireAuth, signToken, toReceipt }) {
     return res.json({ token: signToken(rows[0].id), cashtag: `$${rows[0].cashtag}` });
   });
 
+  // One-step entry: signs in if the cashtag exists, otherwise creates the account.
+  app.post('/api/auth/continue', limited, async (req, res) => {
+    const tag = norm(req.body?.cashtag), pw = String(req.body?.password ?? '');
+    if (!TAG.test(tag)) return res.status(400).json({ error: 'invalid_cashtag' });
+    try {
+      const { rows } = await pool.query('SELECT id, cashtag, password_hash FROM users WHERE cashtag=$1', [tag]);
+      if (rows[0]) {
+        if (!(await verify(pw, rows[0].password_hash))) return res.status(401).json({ error: 'invalid_credentials' });
+        return res.json({ token: signToken(rows[0].id), cashtag: `$${rows[0].cashtag}`, created: false });
+      }
+      if (pw.length < 10 || pw.length > 200) return res.status(400).json({ error: 'weak_password' });
+      const ins = await pool.query('INSERT INTO users (cashtag, password_hash) VALUES ($1,$2) RETURNING id, cashtag', [tag, await hash(pw)]);
+      return res.status(201).json({ token: signToken(ins.rows[0].id), cashtag: `$${ins.rows[0].cashtag}`, created: true });
+    } catch (e) {
+      if (e.code === '23505') return res.status(401).json({ error: 'invalid_credentials' }); // lost a signup race
+      console.error(e); return res.status(500).json({ error: 'server_error' });
+    }
+  });
+
   // Create a transfer. Recipient must be a registered user; status starts 'pending' and only the
   // signed payment webhook can move it forward.
   app.post('/api/transactions', requireAuth, async (req, res) => {

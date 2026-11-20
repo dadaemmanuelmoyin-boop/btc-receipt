@@ -30,16 +30,16 @@
 <body>
 <div class="wrap">
   <section id="auth" hidden>
-    <h1 id="authTitle">Sign in</h1>
+    <h1>Welcome</h1>
     <form id="authForm" novalidate>
       <label for="tag">Cashtag</label>
       <input id="tag" autocomplete="username" autocapitalize="none" placeholder="$yourname" required>
       <label for="pw">Password</label>
-      <input id="pw" type="password" autocomplete="current-password" minlength="10" required>
+      <input id="pw" type="password" autocomplete="current-password" required>
       <p class="err" id="authErr" role="alert"></p>
-      <button class="btn" id="authBtn">Sign in</button>
+      <button class="btn" id="authBtn">Continue</button>
     </form>
-    <p><button class="link" id="toggle" type="button">Create an account</button></p>
+    <p class="s" style="color:var(--muted);font-size:.9375rem">New here? Pick a cashtag and a password of 10+ characters and we’ll create your account.</p>
   </section>
 
   <section id="app" hidden>
@@ -60,7 +60,7 @@
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
-let mode = 'login', token = sessionStorage.getItem('token');
+let token = localStorage.getItem('token') || sessionStorage.getItem('token');
 
 const post = async (url, body, headers = {}) => {
   const r = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }), ...headers }, body: JSON.stringify(body) });
@@ -74,17 +74,12 @@ const say = (el, e) => { el.textContent = MSG[e.code] || 'Something went wrong. 
 
 function view() { $('auth').hidden = !!token; $('app').hidden = !token; if (token) loadList(); }
 
-$('toggle').onclick = () => { mode = mode === 'login' ? 'register' : 'login';
-  $('authTitle').textContent = $('authBtn').textContent = mode === 'login' ? 'Sign in' : 'Create account';
-  $('toggle').textContent = mode === 'login' ? 'Create an account' : 'I already have an account';
-  $('pw').autocomplete = mode === 'login' ? 'current-password' : 'new-password'; $('authErr').textContent = ''; };
-
 $('authForm').onsubmit = async (e) => { e.preventDefault(); $('authBtn').disabled = true; $('authErr').textContent = '';
-  try { const r = await post(`/api/auth/${mode === 'login' ? 'login' : 'register'}`, { cashtag: $('tag').value, password: $('pw').value });
-    token = r.token; sessionStorage.setItem('token', token); $('pw').value = ''; view(); }
+  try { const r = await post('/api/auth/continue', { cashtag: $('tag').value, password: $('pw').value });
+    token = r.token; localStorage.setItem('token', token); sessionStorage.setItem('token', token); $('pw').value = ''; view(); }
   catch (err) { say($('authErr'), err); } finally { $('authBtn').disabled = false; } };
 
-$('out').onclick = () => { sessionStorage.removeItem('token'); token = null; view(); };
+$('out').onclick = () => { localStorage.removeItem('token'); sessionStorage.removeItem('token'); token = null; view(); };
 
 $('sendForm').onsubmit = async (e) => { e.preventDefault(); $('sendErr').textContent = '';
   const dollars = Number($('amt').value.replace(/[$,]/g, ''));

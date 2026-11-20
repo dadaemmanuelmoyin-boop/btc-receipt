@@ -50,7 +50,7 @@
 <script type="module">
 const params = new URLSearchParams(location.search);
 const txId = params.get('id');
-const token = sessionStorage.getItem('token'); // set by your login flow
+const token = localStorage.getItem('token') || sessionStorage.getItem('token'); // set by your login flow
 const $ = (id) => document.getElementById(id);
 const els = { headline: $('headline'), note: $('note'), pill: $('pill'), badge: $('badge'), live: $('live'), icon: $('icon') };
 const CHECK = 'M5 12.5l4.5 4.5L19 7.5', CROSS = 'M6 6l12 12M18 6L6 18';

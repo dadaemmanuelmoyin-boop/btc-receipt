@@ -127,7 +127,7 @@ app.use(express.json({ limit: '8kb' }));
 app.set('trust proxy', 1);
 app.use(express.static(new URL('./public', import.meta.url).pathname));
 
-const signToken = (sub) => jwt.sign({ sub }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' });
+const signToken = (sub) => jwt.sign({ sub }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '30d' });
 mountSite({ app, pool, requireAuth, signToken, toReceipt });
 
 // ---------- receipt ----------

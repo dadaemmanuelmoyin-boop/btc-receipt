@@ -41,7 +41,7 @@ The open page flips from Pending to "View receipt" within one poll interval, and
 ## Website
 `npm run migrate` now also applies `db/002_website.sql` (users, idempotent transfer creation).
 
-Pages: `/` (sign in / create account, send form, activity list) and `/transfer.html?id=…` (the status screen).
+Pages: `/` (one Continue screen: signs in or creates the account, then send form and activity) and `/transfer.html?id=…` (status screen).
 Flow: register two accounts → send from one to the other's cashtag → the status screen opens in **Pending** and flips when your payment provider's signed webhook reports `completed`.
 
 Deploy (Render, Railway, Fly, any Node host): set `DATABASE_URL`, `JWT_SECRET`, `WEBHOOK_SECRET`, run `npm run migrate` once, start with `npm start`, and serve over HTTPS only. Point the provider's webhook at `https://<your-domain>/api/webhooks/payment-status`.
